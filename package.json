@@ -1,6 +1,6 @@
 {
   "name": "rtu-schedule-unofficial-client",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "NPM package for scraping RTU schedule data from nodarbibas.rtu.lv",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
