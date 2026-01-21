@@ -143,14 +143,50 @@ export class DiscoveryService {
     const academicYear = parseAcademicYear(semester.name);
     const season = parseSeason(semester.name);
 
+    // Use metadata dates if selected semester, otherwise calculate defaults
+    let startDate: Date;
+    let endDate: Date;
+
+    if (semester.isSelected && metadata.startDate && metadata.endDate) {
+      // Use actual dates from metadata for the selected semester
+      startDate = new Date(metadata.startDate);
+      endDate = new Date(metadata.endDate);
+    } else {
+      // Calculate default date ranges based on season and academic year
+      const yearMatch = academicYear.match(/^(\d{4})\/(\d{4})$/);
+      const startYear = yearMatch ? parseInt(yearMatch[1], 10) : new Date().getFullYear();
+      const endYear = yearMatch ? parseInt(yearMatch[2], 10) : startYear + 1;
+
+      switch (season) {
+        case 'autumn':
+          // Autumn semester: September to January
+          startDate = new Date(startYear, 8, 1); // September 1st
+          endDate = new Date(endYear, 0, 31); // January 31st
+          break;
+        case 'spring':
+          // Spring semester: February to June
+          startDate = new Date(endYear, 1, 1); // February 1st
+          endDate = new Date(endYear, 5, 30); // June 30th
+          break;
+        case 'summer':
+          // Summer semester: July to August
+          startDate = new Date(endYear, 6, 1); // July 1st
+          endDate = new Date(endYear, 7, 31); // August 31st
+          break;
+        default:
+          startDate = new Date();
+          endDate = new Date();
+      }
+    }
+
     return {
       id: semester.id,
       name: semester.name,
       code,
       academicYear,
       season,
-      startDate: metadata.startDate ? new Date(metadata.startDate) : new Date(),
-      endDate: metadata.endDate ? new Date(metadata.endDate) : new Date(),
+      startDate,
+      endDate,
       isSelected: semester.isSelected,
     };
   }
