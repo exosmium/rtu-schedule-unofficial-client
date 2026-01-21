@@ -161,19 +161,19 @@ export class DiscoveryService {
 
       switch (season) {
         case 'autumn':
-          // Autumn semester: September to January
+          // Autumn semester: September to late January
           startDate = new Date(startYear, 8, 1); // September 1st
-          endDate = new Date(endYear, 0, 31); // January 31st
+          endDate = new Date(endYear, 0, 25); // January 25th
           break;
         case 'spring':
-          // Spring semester: February to June
-          startDate = new Date(endYear, 1, 1); // February 1st
-          endDate = new Date(endYear, 5, 30); // June 30th
+          // Spring semester: late January to late June
+          startDate = new Date(endYear, 0, 26); // January 26th
+          endDate = new Date(endYear, 5, 21); // June 21st
           break;
         case 'summer':
-          // Summer semester: July to August
-          startDate = new Date(endYear, 6, 1); // July 1st
-          endDate = new Date(endYear, 7, 31); // August 31st
+          // Summer semester: late June to late August
+          startDate = new Date(endYear, 5, 29); // June 29th
+          endDate = new Date(endYear, 7, 23); // August 23rd
           break;
         default:
           startDate = new Date();
