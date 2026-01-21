@@ -155,9 +155,9 @@ export class DiscoveryService {
       // Calculate default date ranges based on season and academic year
       const yearMatch = academicYear.match(/^(\d{4})\/(\d{4})$/);
       const startYear = yearMatch
-        ? parseInt(yearMatch[1], 10)
+        ? parseInt(yearMatch[1]!, 10)
         : new Date().getFullYear();
-      const endYear = yearMatch ? parseInt(yearMatch[2], 10) : startYear + 1;
+      const endYear = yearMatch ? parseInt(yearMatch[2]!, 10) : startYear + 1;
 
       switch (season) {
         case 'autumn':
