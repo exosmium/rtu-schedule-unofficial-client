@@ -140,10 +140,7 @@ export class RTUApiClient {
         })
       );
 
-      const published =
-        response.data != null && typeof response.data === 'object'
-          ? Boolean((response.data as { published?: boolean }).published)
-          : false;
+      const published = response.data != null ? Boolean(response.data) : false;
 
       this.setCache(cacheKey, published);
       return published;
