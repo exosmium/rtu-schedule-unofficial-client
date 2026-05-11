@@ -1,7 +1,7 @@
 <h1 align="center">
   <br />
   <a href="https://www.rtu.lv">
-    <img height="220" src="https://www.rtu.lv/download/rtu_logo_lv.jpg" alt="RTU" style="border-radius: 20px;" />
+    <img height="220" src="assets/rtu_logo_lv.jpg" alt="RTU" style="border-radius: 20px;" />
   </a>
 </h1>
 
