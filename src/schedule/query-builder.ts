@@ -7,6 +7,8 @@ import { Resolver } from './resolver.js';
 import type {
   QueryError,
   QueryScope,
+  QuerySource,
+  ScheduleEntry,
   StudyCourse,
   StudyGroup,
   StudyProgram,
@@ -22,9 +24,11 @@ export async function withConcurrency<T>(
   limit: number
 ): Promise<PromiseSettledResult<T>[]> {
   if (limit <= 0) {
-    throw new Error(`withConcurrency: limit must be a positive integer, got ${limit}`);
+    throw new Error(
+      `withConcurrency: limit must be a positive integer, got ${limit}`
+    );
   }
-  const results: PromiseSettledResult<T>[] = new Array(tasks.length);
+  const results = new Array<PromiseSettledResult<T>>(tasks.length);
   let nextIndex = 0;
 
   async function runNext(): Promise<void> {
@@ -33,20 +37,15 @@ export async function withConcurrency<T>(
     try {
       results[index] = { status: 'fulfilled', value: await tasks[index]!() };
     } catch (err) {
-      results[index] = {
-        status: 'rejected',
-        reason: err,
-      };
+      results[index] = { status: 'rejected', reason: err };
     }
     await runNext();
   }
 
-  const workers = Array.from(
-    { length: Math.min(limit, tasks.length) },
-    () => runNext()
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, () =>
+    runNext()
   );
   await Promise.all(workers);
-
   return results;
 }
 
@@ -68,7 +67,6 @@ export class ScheduleQuery {
     filter: Record<string, unknown>,
     scope: QueryScope = {}
   ): Promise<QueryResult> {
-    // Step 1 — Validate filter
     try {
       sift(filter);
     } catch (err) {
@@ -77,43 +75,99 @@ export class ScheduleQuery {
       );
     }
 
-    // Step 2 — Resolve period
+    const { targets, startDate, endDate } = await this.resolveTargets(scope);
+    const months = getMonthsBetween(startDate, endDate);
+    const sources: QuerySource[] = targets.map((t) => ({
+      program: t.program,
+      course: t.course,
+      group: t.group,
+    }));
+
+    if (months.length === 0) {
+      return new QueryResult([], sources, false, [], new Date());
+    }
+
+    const concurrency = scope.concurrency ?? 5;
+    const { entries, errors } = await this.fetchAndTag(
+      targets,
+      months,
+      concurrency
+    );
+
+    const seen = new Set<number>();
+    const deduped: ScheduleEntry[] = [];
+    for (const entry of entries) {
+      if (!seen.has(entry.id)) {
+        seen.add(entry.id);
+        deduped.push(entry);
+      }
+    }
+
+    const siftFilter = sift(filter);
+    const filtered = deduped.filter(
+      siftFilter as (entry: ScheduleEntry) => boolean
+    );
+    filtered.sort(
+      (a, b) => a.startDateTime.getTime() - b.startDateTime.getTime()
+    );
+
+    return new QueryResult(
+      filtered,
+      sources,
+      errors.length > 0,
+      errors,
+      new Date()
+    );
+  }
+
+  private async resolveTargets(scope: QueryScope): Promise<{
+    targets: FetchTarget[];
+    startDate: Date;
+    endDate: Date;
+  }> {
     const periodObj =
       scope.period !== undefined
         ? await this.resolver.resolvePeriod(scope.period)
         : await this.discoveryService.discoverCurrentPeriod();
-    if (!periodObj) throw new PeriodNotFoundError('current');
+    if (periodObj === null) throw new PeriodNotFoundError('current');
 
-    // Step 3 — Resolve programs
     const programs =
       scope.program !== undefined
         ? [await this.resolver.resolveProgram(scope.program, periodObj.id)]
         : await this.discoveryService.discoverPrograms(periodObj.id);
 
-    // Step 5 — Determine date range (before step 4 so we have the dates for the estimate)
-    const startDate = scope.startDate
-      ? parseDate(scope.startDate)
-      : periodObj.startDate;
-    const endDate = scope.endDate
-      ? parseDate(scope.endDate)
-      : periodObj.endDate;
+    const startDate =
+      scope.startDate !== undefined
+        ? parseDate(scope.startDate)
+        : periodObj.startDate;
+    const endDate =
+      scope.endDate !== undefined
+        ? parseDate(scope.endDate)
+        : periodObj.endDate;
 
-    // Step 4 — Warn if wide
     if (scope.program === undefined) {
-      const months = getMonthsBetween(startDate, endDate).length;
-      const estimated = programs.length * 3 * 3 * months;
+      const monthCount = getMonthsBetween(startDate, endDate).length;
+      const estimated = programs.length * 3 * 3 * monthCount;
       console.warn(
         `[rtu-schedule] Warning: find() without a program scope will query all programs ` +
           `in the period (~${estimated} API calls). Pass { program: 'RDBD0' } as the scope argument to narrow the search.`
       );
     }
 
-    // Step 6 — Enumerate semesterProgramIds
+    const targets = await this.enumerateTargets(scope, periodObj.id, programs);
+    return { targets, startDate, endDate };
+  }
+
+  private async enumerateTargets(
+    scope: QueryScope,
+    periodId: number,
+    programs: StudyProgram[]
+  ): Promise<FetchTarget[]> {
     const targets: FetchTarget[] = [];
 
     for (const program of programs) {
       const rawCourses = await this.apiClient.findCoursesByProgram({
-        semesterId: periodObj.id,
+        semesterId: periodId,
         programId: program.id,
       });
 
@@ -131,7 +185,7 @@ export class ScheduleQuery {
       for (const course of filteredCourses) {
         const rawGroups = await this.apiClient.findGroupsByCourse({
           courseId: course.id,
-          semesterId: periodObj.id,
+          semesterId: periodId,
           programId: program.id,
         });
 
@@ -147,8 +201,7 @@ export class ScheduleQuery {
 
         const allGroups: StudyGroup[] = rawGroups.map((g) => ({
           id: g.semesterProgramId,
-          number:
-            parseInt(g.group?.match(/(\d+)/)?.[1] ?? '0', 10) || 0,
+          number: parseInt(g.group?.match(/(\d+)/)?.[1] ?? '0', 10) || 0,
           name: g.group,
           studentCount: 0,
           semesterProgramId: g.semesterProgramId,
@@ -170,41 +223,26 @@ export class ScheduleQuery {
       }
     }
 
-    // Step 7 — Check published (parallel, concurrency-limited)
-    const concurrency = scope.concurrency ?? 5;
+    return targets;
+  }
 
+  private async fetchAndTag(
+    targets: FetchTarget[],
+    months: { year: number; month: number }[],
+    concurrency: number
+  ): Promise<{ entries: ScheduleEntry[]; errors: QueryError[] }> {
     const publishedResults = await withConcurrency(
-      targets.map((target) => () =>
-        this.apiClient.checkSemesterProgramPublished(target.semesterProgramId)
+      targets.map(
+        (target) => () =>
+          this.apiClient.checkSemesterProgramPublished(target.semesterProgramId)
       ),
       concurrency
     );
 
-    const publishedTargets = targets.filter(
-      (_, i) =>
-        publishedResults[i]?.status === 'fulfilled' &&
-        (publishedResults[i] as PromiseFulfilledResult<boolean>).value === true
-    );
-
-    // Step 8 — Fetch events (parallel, concurrency-limited)
-    const months = getMonthsBetween(startDate, endDate);
-
-    if (months.length === 0) {
-      return new QueryResult(
-        [],
-        targets.map((t) => ({
-          program: t.program,
-          course: t.course,
-          group: t.group,
-        })),
-        false,
-        [],
-        new Date()
-      );
-    }
-
-    const errors: QueryError[] = [];
-    const allEntries: ReturnType<typeof transformToScheduleEntry>[] = [];
+    const publishedTargets = targets.filter((_, i) => {
+      const r = publishedResults[i];
+      return r?.status === 'fulfilled' && r.value === true;
+    });
 
     const fetchTasks = publishedTargets.flatMap((target) =>
       months.map(
@@ -222,6 +260,9 @@ export class ScheduleQuery {
 
     const fetchResults = await withConcurrency(fetchTasks, concurrency);
 
+    const entries: ScheduleEntry[] = [];
+    const errors: QueryError[] = [];
+
     fetchResults.forEach((result, taskIndex) => {
       if (result.status === 'fulfilled') {
         const { target, events } = result.value;
@@ -232,16 +273,15 @@ export class ScheduleQuery {
             course: target.course,
             group: target.group,
           };
-          allEntries.push(entry);
+          entries.push(entry);
         }
       } else {
-        // Since tasks are ordered by target then month, we reconstruct the target
         const targetIndex = Math.floor(taskIndex / months.length);
         const target = publishedTargets[targetIndex];
-        if (target) {
+        if (target !== undefined) {
           const cause =
             result.reason instanceof Error ? result.reason : undefined;
-          const queryError: QueryError = {
+          errors.push({
             source: {
               program: target.program,
               course: target.course,
@@ -252,41 +292,11 @@ export class ScheduleQuery {
                 ? result.reason.message
                 : String(result.reason),
             ...(cause !== undefined && { cause }),
-          };
-          errors.push(queryError);
+          });
         }
       }
     });
 
-    // Step 9 — Deduplicate by eventDateId (entry.id)
-    const seen = new Set<number>();
-    const deduped: typeof allEntries = [];
-    for (const entry of allEntries) {
-      if (!seen.has(entry.id)) {
-        seen.add(entry.id);
-        deduped.push(entry);
-      }
-    }
-
-    // Step 10 — Apply filter and return
-    const siftFilter = sift(filter);
-    const filtered = deduped.filter(
-      siftFilter as (entry: (typeof deduped)[0]) => boolean
-    );
-    filtered.sort(
-      (a, b) => a.startDateTime.getTime() - b.startDateTime.getTime()
-    );
-
-    return new QueryResult(
-      filtered,
-      targets.map((t) => ({
-        program: t.program,
-        course: t.course,
-        group: t.group,
-      })),
-      errors.length > 0,
-      errors,
-      new Date()
-    );
+    return { entries, errors };
   }
 }
