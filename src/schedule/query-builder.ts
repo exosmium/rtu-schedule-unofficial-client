@@ -21,6 +21,9 @@ export async function withConcurrency<T>(
   tasks: (() => Promise<T>)[],
   limit: number
 ): Promise<PromiseSettledResult<T>[]> {
+  if (limit <= 0) {
+    throw new Error(`withConcurrency: limit must be a positive integer, got ${limit}`);
+  }
   const results: PromiseSettledResult<T>[] = new Array(tasks.length);
   let nextIndex = 0;
 
@@ -185,6 +188,21 @@ export class ScheduleQuery {
 
     // Step 8 — Fetch events (parallel, concurrency-limited)
     const months = getMonthsBetween(startDate, endDate);
+
+    if (months.length === 0) {
+      return new QueryResult(
+        [],
+        targets.map((t) => ({
+          program: t.program,
+          course: t.course,
+          group: t.group,
+        })),
+        false,
+        [],
+        new Date()
+      );
+    }
+
     const errors: QueryError[] = [];
     const allEntries: ReturnType<typeof transformToScheduleEntry>[] = [];
 
@@ -204,7 +222,7 @@ export class ScheduleQuery {
 
     const fetchResults = await withConcurrency(fetchTasks, concurrency);
 
-    for (const result of fetchResults) {
+    fetchResults.forEach((result, taskIndex) => {
       if (result.status === 'fulfilled') {
         const { target, events } = result.value;
         for (const event of events) {
@@ -217,9 +235,7 @@ export class ScheduleQuery {
           allEntries.push(entry);
         }
       } else {
-        // Find which target this failure belongs to by matching the rejection context
         // Since tasks are ordered by target then month, we reconstruct the target
-        const taskIndex = fetchResults.indexOf(result);
         const targetIndex = Math.floor(taskIndex / months.length);
         const target = publishedTargets[targetIndex];
         if (target) {
@@ -240,7 +256,7 @@ export class ScheduleQuery {
           errors.push(queryError);
         }
       }
-    }
+    });
 
     // Step 9 — Deduplicate by eventDateId (entry.id)
     const seen = new Set<number>();
