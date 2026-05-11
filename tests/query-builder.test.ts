@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { RTUApiClient } from '../src/api-client.js';
 import { RTUSchedule } from '../src/schedule/index.js';
 import { withConcurrency } from '../src/schedule/query-builder.js';
 import {
@@ -367,22 +368,20 @@ describe('partial failures (unit test with spy)', () => {
       // and succeed for subsequent calls
       const apiClient = (
         rtu as unknown as {
-          apiClient: {
-            fetchSemesterProgramEvents: (...args: unknown[]) => unknown;
-          };
+          apiClient: RTUApiClient;
         }
       ).apiClient;
+      const original = apiClient.fetchSemesterProgramEvents.bind(apiClient);
       let callCount = 0;
-      const spy = vi
-        .spyOn(apiClient, 'fetchSemesterProgramEvents')
-        .mockImplementation((...args: unknown[]) => {
+      vi.spyOn(apiClient, 'fetchSemesterProgramEvents').mockImplementation(
+        (...args) => {
           callCount++;
           if (callCount === 1) {
             return Promise.reject(new Error('Simulated fetch failure'));
           }
-          // Call through to original for subsequent calls
-          return spy.wrappedImplementation!(...args);
-        });
+          return original(...args);
+        }
+      );
 
       const result = await rtu.find(
         {},
