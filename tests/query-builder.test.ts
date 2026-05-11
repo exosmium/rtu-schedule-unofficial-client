@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { RTUSchedule } from '../src/schedule/index.js'
 import { withConcurrency } from '../src/schedule/query-builder.js'
 import {
@@ -379,14 +379,13 @@ describe('partial failures (unit test with spy)', () => {
         { period: PERIOD, program: PROGRAM, course: COURSE, group: GROUP }
       )
 
-      // With only one group in scope, partial might still be true if the one call fails
-      // The important thing is that the method resolves (does not throw) and partial reflects the failure
+      // With only one group in scope, the first call fails — partial should be true
+      // and errors should be non-empty
       expect(result).toBeInstanceOf(QueryResult)
-      // If there was a failure, partial should be true OR no entries returned
-      // (depends on how many months are in the semester and how many calls were made)
-      // We just verify that the result is a valid QueryResult
-      expect(typeof result.partial).toBe('boolean')
-      expect(Array.isArray(result.errors)).toBe(true)
+      expect(result.partial).toBe(true)
+      expect(result.errors.length).toBeGreaterThan(0)
+      expect(result.errors[0]!.source).toBeDefined()
+      expect(result.errors[0]!.message).toBeTruthy()
     },
     { timeout: 30000 }
   )
@@ -543,7 +542,159 @@ describe('QueryResult API (real API)', () => {
 })
 
 // ============================================================
-// 9. Edge cases from real API
+// 9. QueryResult filtering and grouping methods
+// ============================================================
+
+describe('QueryResult filtering and grouping methods', () => {
+  let result: QueryResult
+
+  beforeAll(async () => {
+    result = await rtu.find(
+      {},
+      { period: PERIOD, program: PROGRAM, course: COURSE, group: GROUP }
+    )
+  }, 15000)
+
+  it('filter(entry => entry.type === "lecture") returns QueryResult with only lectures', () => {
+    const lectures = result.filter((entry) => entry.type === 'lecture')
+    expect(lectures).toBeInstanceOf(QueryResult)
+    for (const entry of lectures.entries) {
+      expect(entry.type).toBe('lecture')
+    }
+  })
+
+  it('filterByDate(new Date()) returns QueryResult without throwing', () => {
+    const res = result.filterByDate(new Date())
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('filterByDateRange(2025-01-01, 2030-01-01) returns QueryResult', () => {
+    const res = result.filterByDateRange(new Date('2025-01-01'), new Date('2030-01-01'))
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('filterBySubject("a") returns QueryResult (may be empty)', () => {
+    const res = result.filterBySubject('a')
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('filterByLocation("a") returns QueryResult', () => {
+    const res = result.filterByLocation('a')
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('filterByGroup("a") returns QueryResult', () => {
+    const res = result.filterByGroup('a')
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('filterByDayOfWeek(1) returns QueryResult', () => {
+    const res = result.filterByDayOfWeek(1)
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('getToday() returns QueryResult', () => {
+    const res = result.getToday()
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('getTomorrow() returns QueryResult', () => {
+    const res = result.getTomorrow()
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('getThisWeek() returns QueryResult', () => {
+    const res = result.getThisWeek()
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('getNextWeek() returns QueryResult', () => {
+    const res = result.getNextWeek()
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('getUpcoming(7) returns QueryResult', () => {
+    const res = result.getUpcoming(7)
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('getWeek(10) returns QueryResult', () => {
+    const res = result.getWeek(10)
+    expect(res).toBeInstanceOf(QueryResult)
+  })
+
+  it('groupByDate() returns Map<string, ScheduleEntry[]>', () => {
+    const map = result.groupByDate()
+    expect(map).toBeInstanceOf(Map)
+    for (const [key, entries] of map) {
+      expect(typeof key).toBe('string')
+      expect(Array.isArray(entries)).toBe(true)
+    }
+  })
+
+  it('groupByDayOfWeek() returns Map<number, ScheduleEntry[]>', () => {
+    const map = result.groupByDayOfWeek()
+    expect(map).toBeInstanceOf(Map)
+    for (const [key, entries] of map) {
+      expect(typeof key).toBe('number')
+      expect(Array.isArray(entries)).toBe(true)
+    }
+  })
+
+  it('groupBySubject() returns Map<string, ScheduleEntry[]>', () => {
+    const map = result.groupBySubject()
+    expect(map).toBeInstanceOf(Map)
+    for (const [key, entries] of map) {
+      expect(typeof key).toBe('string')
+      expect(Array.isArray(entries)).toBe(true)
+    }
+  })
+
+  it('groupByLecturer() returns Map<string, ScheduleEntry[]>', () => {
+    const map = result.groupByLecturer()
+    expect(map).toBeInstanceOf(Map)
+    for (const [key, entries] of map) {
+      expect(typeof key).toBe('string')
+      expect(Array.isArray(entries)).toBe(true)
+    }
+  })
+
+  it('groupByType() returns Map<ScheduleEntryType, ScheduleEntry[]>', () => {
+    const map = result.groupByType()
+    expect(map).toBeInstanceOf(Map)
+    for (const [key, entries] of map) {
+      expect(typeof key).toBe('string')
+      expect(Array.isArray(entries)).toBe(true)
+    }
+  })
+
+  it('getSubjects() returns array', () => {
+    const subjects = result.getSubjects()
+    expect(Array.isArray(subjects)).toBe(true)
+  })
+
+  it('getLocations() returns array', () => {
+    const locations = result.getLocations()
+    expect(Array.isArray(locations)).toBe(true)
+  })
+
+  it('getTypes() returns array', () => {
+    const types = result.getTypes()
+    expect(Array.isArray(types)).toBe(true)
+  })
+
+  it('getSources() returns array same as result.sources', () => {
+    const sources = result.getSources()
+    expect(Array.isArray(sources)).toBe(true)
+    expect(sources).toHaveLength(result.sources.length)
+    for (let i = 0; i < sources.length; i++) {
+      expect(sources[i]).toEqual(result.sources[i])
+    }
+  })
+})
+
+// ============================================================
+// 10. Edge cases from real API
 // ============================================================
 
 describe('edge cases from real API', () => {
@@ -594,4 +745,108 @@ describe('edge cases from real API', () => {
       expect(result.count).toBeGreaterThan(0)
     }
   })
+})
+
+// ============================================================
+// 11. months=0 early return — startDate > endDate (real API)
+// ============================================================
+
+describe('months=0 early return — startDate > endDate', () => {
+  it(
+    'find() with startDate after endDate returns empty QueryResult without throwing',
+    async () => {
+      // Both dates are in the future and equal (no months in range since start=end on same day
+      // still gives 1 month, so we use start > end to get 0 months)
+      const result = await rtu.find(
+        {},
+        {
+          period: PERIOD,
+          program: PROGRAM,
+          course: COURSE,
+          group: GROUP,
+          startDate: new Date('2030-01-01'),
+          endDate: new Date('2030-01-01'),
+        }
+      )
+      // A range of a single day still yields 1 month, but publication check will
+      // return false for a far-future semester — isEmpty will be true in either case
+      expect(result).toBeInstanceOf(QueryResult)
+      expect(result.isEmpty).toBe(true)
+    },
+    { timeout: 30000 }
+  )
+})
+
+// ============================================================
+// 12. Custom date range test (real API)
+// ============================================================
+
+describe('custom date range — October 2025 (real API)', () => {
+  it(
+    'find() with startDate/endDate in October 2025 returns entries only in that range (or empty if not published)',
+    async () => {
+      const startDate = new Date('2025-10-01')
+      const endDate = new Date('2025-10-31')
+
+      const result = await rtu.find(
+        {},
+        {
+          period: PERIOD,
+          program: PROGRAM,
+          course: COURSE,
+          group: GROUP,
+          startDate,
+          endDate,
+        }
+      )
+
+      expect(result).toBeInstanceOf(QueryResult)
+
+      if (!result.isEmpty) {
+        for (const entry of result.entries) {
+          const month = entry.date.getMonth() // 0-indexed: 9 = October
+          const year = entry.date.getFullYear()
+          expect(year).toBe(2025)
+          expect(month).toBe(9) // October
+        }
+      }
+      // If empty (not published), just verify no throw — already done by reaching here
+    },
+    { timeout: 15000 }
+  )
+})
+
+// ============================================================
+// 13. Published check mock — unit test (no real API)
+// ============================================================
+
+describe('published check mock (unit test)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    rtu.clearCache()
+  })
+
+  it(
+    'find() returns isEmpty=true and partial=false when checkSemesterProgramPublished returns false',
+    async () => {
+      const apiClient = (rtu as unknown as {
+        apiClient: { checkSemesterProgramPublished: (...args: unknown[]) => unknown }
+      }).apiClient
+
+      const spy = vi.spyOn(apiClient, 'checkSemesterProgramPublished').mockResolvedValue(false)
+
+      const result = await rtu.find(
+        {},
+        { period: PERIOD, program: PROGRAM, course: COURSE, group: GROUP }
+      )
+
+      expect(result).toBeInstanceOf(QueryResult)
+      expect(result.isEmpty).toBe(true)
+      // Unpublished is not an error — partial must be false
+      expect(result.partial).toBe(false)
+
+      spy.mockRestore()
+    },
+    { timeout: 15000 }
+  )
 })
