@@ -38,7 +38,7 @@ export const htmlParser = new RTUHtmlParser();
 // ========== HIGH-LEVEL API (new user-friendly interface) ==========
 
 // Main class
-export { RTUSchedule, Schedule } from './schedule/index.js';
+export { RTUSchedule, Schedule, QueryResult } from './schedule/index.js';
 
 // Types
 export type {
@@ -53,6 +53,9 @@ export type {
   GetScheduleOptions,
   RTUScheduleConfig,
   ScheduleMetadata,
+  QueryScope,
+  QuerySource,
+  QueryError,
 } from './schedule/index.js';
 
 // Error classes
@@ -65,6 +68,7 @@ export {
   ScheduleNotPublishedError,
   DiscoveryError,
   InvalidOptionsError,
+  InvalidQueryError,
 } from './schedule/index.js';
 
 // Advanced services (for power users)

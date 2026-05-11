@@ -3,6 +3,7 @@ import { RTUHtmlParser } from '../html-parser.js';
 import type { SemesterEvent } from '../types.js';
 import type {
   GetScheduleOptions,
+  QueryScope,
   RTUScheduleConfig,
   ScheduleEntry,
   StudyCourse,
@@ -11,6 +12,8 @@ import type {
   StudyProgram,
 } from './types.js';
 import { Schedule } from './schedule-result.js';
+import { QueryResult } from './query-result.js';
+import { ScheduleQuery } from './query-builder.js';
 import { DiscoveryService } from './discovery.js';
 import { Resolver } from './resolver.js';
 import { InvalidOptionsError, PeriodNotFoundError } from './errors.js';
@@ -254,6 +257,29 @@ export class RTUSchedule {
       group: groupObj,
       fetchedAt: new Date(),
     });
+  }
+
+  /**
+   * Find schedule entries using a flexible query builder
+   *
+   * @example
+   * ```typescript
+   * const results = await rtu.find(
+   *   { program: 'RDBD0', course: 1, group: 13 },
+   *   { withConcurrency: 5 }
+   * );
+   * ```
+   */
+  async find(
+    filter: Record<string, unknown> = {},
+    scope: QueryScope = {}
+  ): Promise<QueryResult> {
+    const scheduleQuery = new ScheduleQuery(
+      this.discoveryService,
+      this.resolver,
+      this.apiClient
+    );
+    return scheduleQuery.execute(filter, scope);
   }
 
   // ========== UTILITY METHODS ==========

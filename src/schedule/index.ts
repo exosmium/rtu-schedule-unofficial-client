@@ -1,6 +1,7 @@
 // Main class
 export { RTUSchedule } from './rtu-schedule.js';
 export { Schedule } from './schedule-result.js';
+export { QueryResult } from './query-result.js';
 
 // Types
 export type {
@@ -15,6 +16,9 @@ export type {
   GetScheduleOptions,
   RTUScheduleConfig,
   ScheduleMetadata,
+  QueryScope,
+  QuerySource,
+  QueryError,
 } from './types.js';
 
 // Errors
@@ -27,6 +31,7 @@ export {
   ScheduleNotPublishedError,
   DiscoveryError,
   InvalidOptionsError,
+  InvalidQueryError,
 } from './errors.js';
 
 // Internal services (for advanced usage)
