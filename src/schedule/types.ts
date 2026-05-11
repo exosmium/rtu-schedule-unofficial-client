@@ -76,6 +76,37 @@ export interface ScheduleSubject {
 }
 
 /**
+ * Query source information
+ */
+export interface QuerySource {
+  program: StudyProgram;
+  course: StudyCourse;
+  group: StudyGroup | undefined;
+}
+
+/**
+ * Query error with source context
+ */
+export interface QueryError {
+  source: QuerySource;
+  message: string;
+  cause?: Error;
+}
+
+/**
+ * Query scope for finding schedules
+ */
+export interface QueryScope {
+  period?: number | string;
+  program?: number | string;
+  course?: number;
+  group?: number;
+  startDate?: Date | string;
+  endDate?: Date | string;
+  concurrency?: number;
+}
+
+/**
  * Rich schedule entry with parsed data
  */
 export interface ScheduleEntry {
@@ -100,6 +131,7 @@ export interface ScheduleEntry {
   dayOfWeek: number;
   dayName: string;
   _raw: SemesterEvent;
+  _source?: QuerySource;
 }
 
 /**

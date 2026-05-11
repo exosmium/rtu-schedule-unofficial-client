@@ -83,3 +83,13 @@ export class InvalidOptionsError extends RTUScheduleError {
     this.name = 'InvalidOptionsError';
   }
 }
+
+/**
+ * Error thrown when a query is invalid
+ */
+export class InvalidQueryError extends RTUScheduleError {
+  constructor(message: string) {
+    super(`Invalid query: ${message}`);
+    this.name = 'InvalidQueryError';
+  }
+}
