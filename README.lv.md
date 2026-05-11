@@ -28,6 +28,7 @@
   <a href="#instalācija">Instalācija</a> •
   <a href="#ātrais-sākums">Ātrais sākums</a> •
   <a href="#api-metodes">API</a> •
+  <a href="#meklēšana-vairākās-grupās">Meklēšana</a> •
   <a href="#schedule-klase">Schedule</a> •
   <a href="#piemēri">Piemēri</a>
 </p>
@@ -108,6 +109,109 @@ const schedule = await rtu.getSchedule({
   startDate: '2025-09-01',
   endDate: '2025-12-31'
 });
+```
+
+## Meklēšana vairākās grupās
+
+`getSchedule()` iegūst datus vienai grupai. `find()` meklē vairākās grupās, kursos vai programmās vienlaicīgi — lai atrastu visas konkrēta pasniedzēja lekcijas, visus eksāmenus programmā utt.
+
+```typescript
+// Visi eksāmeni pašreizējā semestrī visās programmās
+const results = await rtu.find({ type: 'exam' })
+
+// Visas konkrēta pasniedzēja lekcijas
+const results = await rtu.find(
+  { lecturer: { $regex: /Bērziņš/i } },
+  { period: '25/26-R', program: 'RDBD0' }
+)
+
+// Komplekss filtrs — pasniedzēja lekcijas VAI jebkurš eksāmens
+const results = await rtu.find(
+  { $or: [
+    { type: 'lecture', lecturer: { $regex: /Bērziņš/i } },
+    { type: 'exam' }
+  ]},
+  { period: '25/26-R', program: 'RDBD0' }
+)
+
+// Konkrētā nedēļu diapazonā
+const results = await rtu.find(
+  { weekNumber: { $gte: 10, $lte: 15 } },
+  { period: '25/26-R', program: 'RDBD0', course: 1, group: 13 }
+)
+```
+
+### Paraksts
+
+```typescript
+rtu.find(filter: object, scope?: QueryScope): Promise<QueryResult>
+```
+
+### QueryScope
+
+```typescript
+interface QueryScope {
+  period?: number | string    // pēc noklusējuma — pašreizējais periods
+  program?: number | string   // pēc noklusējuma — visas programmas (daudz API pieprasījumu — sašauriniet, ja iespējams)
+  course?: number             // pēc noklusējuma — visi kursi
+  group?: number              // pēc noklusējuma — visas grupas
+  startDate?: Date | string   // pēc noklusējuma — perioda sākums
+  endDate?: Date | string     // pēc noklusējuma — perioda beigas
+  concurrency?: number        // maks. paralēlie pieprasījumi, noklusējums 5
+}
+```
+
+### Filtra operatori
+
+Filtrs izmanto [MongoDB vaicājumu sintaksi](https://github.com/crcn/sift.js) uz `ScheduleEntry` laukiem:
+
+| Operators | Apraksts | Piemērs |
+|---|---|---|
+| `$eq` | Vienāds | `{ type: { $eq: 'exam' } }` vai vienkārši `{ type: 'exam' }` |
+| `$ne` | Nav vienāds | `{ type: { $ne: 'lab' } }` |
+| `$in` | Sarakstā | `{ type: { $in: ['exam', 'test'] } }` |
+| `$nin` | Nav sarakstā | `{ type: { $nin: ['lab', 'practical'] } }` |
+| `$gt` / `$gte` | Lielāks par | `{ weekNumber: { $gte: 10 } }` |
+| `$lt` / `$lte` | Mazāks par | `{ durationMinutes: { $lte: 90 } }` |
+| `$regex` | Regulārā izteiksme | `{ lecturer: { $regex: /Bērziņš/i } }` |
+| `$exists` | Lauks eksistē | `{ building: { $exists: true } }` |
+| `$and` | Visi nosacījumi | `{ $and: [{ type: 'lecture' }, { dayOfWeek: 1 }] }` |
+| `$or` | Jebkurš nosacījums | `{ $or: [{ type: 'exam' }, { type: 'test' }] }` |
+| `$not` | Noliegums | `{ $not: { type: 'lab' } }` |
+
+> **Padoms par pasniedzēju:** `$regex` meklē tikai `lecturer` laukā. Lai meklētu arī `lecturers[]` masīvā, izmantojiet `filterByLecturer()` uz rezultāta.
+
+### QueryResult
+
+`find()` atgriež `QueryResult` — tāda pati filtrēšanas/grupēšanas saskarne kā `Schedule`, plus vairāku avotu metadati:
+
+```typescript
+results.count                    // kopējais ierakstu skaits
+results.isEmpty                  // boolean
+results.partial                  // true, ja daži grupas pieprasījumi neizdevās
+results.errors                   // QueryError[] — kas neizdevās un kāpēc
+results.sources                  // QuerySource[] — kuras grupas tika meklētas
+
+// Tādas pašas filtrēšanas/grupēšanas/ērtības metodes kā Schedule
+results.filterByType('lecture')
+results.filterByLecturer('Bērziņš')
+results.getThisWeek()
+results.groupByWeek()
+results.groupBySource()          // Map ar atslēgu "programma-kurss-grupa"
+results.sorted('asc')
+
+// Iterējams
+for (const entry of results) { ... }
+[...results]
+```
+
+Katram ierakstam ir `_source` ar programmas/kursa/grupas informāciju:
+
+```typescript
+for (const entry of results) {
+  console.log(entry._source?.program.code)  // piem. 'RDBD0'
+  console.log(entry._source?.group?.name)   // piem. '13. grupa'
+}
 ```
 
 ## Schedule Klase
@@ -225,7 +329,8 @@ import {
   ProgramNotFoundError,     // Programma nav atrasta
   CourseNotFoundError,      // Kurss nav atrasts
   GroupNotFoundError,       // Grupa nav atrasta
-  InvalidOptionsError,      // Nederīgi parametri
+  InvalidOptionsError,      // Nederīgi parametri getSchedule()
+  InvalidQueryError,        // Nederīgs filtrs find()
   DiscoveryError            // Atklāšanas kļūda
 } from 'rtu-schedule-unofficial-client';
 
@@ -282,6 +387,9 @@ import type {
   // Augsta līmeņa
   StudyPeriod, StudyProgram, StudyCourse, StudyGroup,
   ScheduleEntry, ScheduleEntryType, GetScheduleOptions,
+
+  // find() / QueryResult
+  QueryScope, QuerySource, QueryError,
 
   // Zema līmeņa
   SemesterEvent, Subject, Group, Course, Faculty, Semester

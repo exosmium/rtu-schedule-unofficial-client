@@ -28,6 +28,7 @@
   <a href="#installation">Installation</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#api-methods">API</a> •
+  <a href="#cross-group-search">Search</a> •
   <a href="#schedule-class">Schedule</a> •
   <a href="#examples">Examples</a>
 </p>
@@ -108,6 +109,109 @@ const schedule = await rtu.getSchedule({
   startDate: '2025-09-01',
   endDate: '2025-12-31'
 });
+```
+
+## Cross-group Search
+
+`getSchedule()` fetches data for one group. `find()` fans out across multiple groups, courses, or programs to answer questions the single-group API cannot — all lectures by a lecturer, all exams across a program, etc.
+
+```typescript
+// All exams in current semester across all programs
+const results = await rtu.find({ type: 'exam' })
+
+// All lectures by a specific lecturer
+const results = await rtu.find(
+  { lecturer: { $regex: /Bērziņš/i } },
+  { period: '25/26-R', program: 'RDBD0' }
+)
+
+// Complex filter — lectures by lecturer OR any exam
+const results = await rtu.find(
+  { $or: [
+    { type: 'lecture', lecturer: { $regex: /Bērziņš/i } },
+    { type: 'exam' }
+  ]},
+  { period: '25/26-R', program: 'RDBD0' }
+)
+
+// Entries in a specific week range
+const results = await rtu.find(
+  { weekNumber: { $gte: 10, $lte: 15 } },
+  { period: '25/26-R', program: 'RDBD0', course: 1, group: 13 }
+)
+```
+
+### Signature
+
+```typescript
+rtu.find(filter: object, scope?: QueryScope): Promise<QueryResult>
+```
+
+### QueryScope
+
+```typescript
+interface QueryScope {
+  period?: number | string    // defaults to current period
+  program?: number | string   // defaults to all programs (many API calls — narrow when possible)
+  course?: number             // defaults to all courses
+  group?: number              // defaults to all groups
+  startDate?: Date | string   // defaults to period start
+  endDate?: Date | string     // defaults to period end
+  concurrency?: number        // max parallel requests, default 5
+}
+```
+
+### Filter Operators
+
+The filter uses [MongoDB query syntax](https://github.com/crcn/sift.js) applied to `ScheduleEntry` fields:
+
+| Operator | Description | Example |
+|---|---|---|
+| `$eq` | Equal | `{ type: { $eq: 'exam' } }` or just `{ type: 'exam' }` |
+| `$ne` | Not equal | `{ type: { $ne: 'lab' } }` |
+| `$in` | In list | `{ type: { $in: ['exam', 'test'] } }` |
+| `$nin` | Not in list | `{ type: { $nin: ['lab', 'practical'] } }` |
+| `$gt` / `$gte` | Greater than | `{ weekNumber: { $gte: 10 } }` |
+| `$lt` / `$lte` | Less than | `{ durationMinutes: { $lte: 90 } }` |
+| `$regex` | Regex match | `{ lecturer: { $regex: /Smith/i } }` |
+| `$exists` | Field exists | `{ building: { $exists: true } }` |
+| `$and` | All conditions | `{ $and: [{ type: 'lecture' }, { dayOfWeek: 1 }] }` |
+| `$or` | Any condition | `{ $or: [{ type: 'exam' }, { type: 'test' }] }` |
+| `$not` | Negate | `{ $not: { type: 'lab' } }` |
+
+> **Lecturer tip:** `$regex` matches only the `lecturer` string field. For robust matching across `lecturers[]` too, chain `filterByLecturer()` on the result.
+
+### QueryResult
+
+`find()` returns a `QueryResult` — same filtering/grouping API as `Schedule`, plus multi-source metadata:
+
+```typescript
+results.count                    // total entries
+results.isEmpty                  // boolean
+results.partial                  // true if some group fetches failed
+results.errors                   // QueryError[] — what failed and why
+results.sources                  // QuerySource[] — which groups were searched
+
+// Same filter/group/convenience methods as Schedule
+results.filterByType('lecture')
+results.filterByLecturer('Bērziņš')
+results.getThisWeek()
+results.groupByWeek()
+results.groupBySource()          // Map keyed by "program-course-group"
+results.sorted('asc')
+
+// Iterate
+for (const entry of results) { ... }
+[...results]
+```
+
+Each entry has `_source` set to the program/course/group it came from:
+
+```typescript
+for (const entry of results) {
+  console.log(entry._source?.program.code)  // e.g. 'RDBD0'
+  console.log(entry._source?.group?.name)   // e.g. '13. grupa'
+}
 ```
 
 ## Schedule Class
@@ -225,7 +329,8 @@ import {
   ProgramNotFoundError,     // Program not found
   CourseNotFoundError,      // Course not found
   GroupNotFoundError,       // Group not found
-  InvalidOptionsError,      // Invalid options
+  InvalidOptionsError,      // Invalid options passed to getSchedule()
+  InvalidQueryError,        // Invalid filter passed to find()
   DiscoveryError            // Discovery error
 } from 'rtu-schedule-unofficial-client';
 
@@ -282,6 +387,9 @@ import type {
   // High-level
   StudyPeriod, StudyProgram, StudyCourse, StudyGroup,
   ScheduleEntry, ScheduleEntryType, GetScheduleOptions,
+
+  // find() / QueryResult
+  QueryScope, QuerySource, QueryError,
 
   // Low-level
   SemesterEvent, Subject, Group, Course, Faculty, Semester
