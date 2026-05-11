@@ -26,10 +26,10 @@
 
 <p align="center">
   <a href="#installation">Installation</a> •
-  <a href="#get-a-schedule">Get a Schedule</a> •
-  <a href="#search-across-groups">Search</a> •
-  <a href="#working-with-results">Results</a> •
-  <a href="#examples">Examples</a>
+  <a href="#usage">Usage</a> •
+  <a href="#filter-operators">Filters</a> •
+  <a href="#results">Results</a> •
+  <a href="#errors">Errors</a>
 </p>
 
 ## Installation
@@ -38,40 +38,17 @@
 npm install rtu-schedule-unofficial-client
 ```
 
-## Get a Schedule
-
-Fetch the schedule for a specific group. Period, program, course, and group are resolved automatically from human-readable strings — no IDs needed.
+## Usage
 
 ```typescript
 import { RTUSchedule } from 'rtu-schedule-unofficial-client';
 
 const rtu = new RTUSchedule();
 
-const schedule = await rtu.getSchedule({
-  period: '25/26-R',   // semester code, name, or numeric ID — defaults to current
-  program: 'RDBD0',    // program code, name, or numeric ID
-  course: 1,           // year of study
-  group: 13,           // group number (optional — omit for all groups in course)
-
-  // Date range (optional — defaults to full semester)
-  startDate: '2025-09-01',
-  endDate: '2025-12-31'
-});
-
-console.log(schedule.count);
-const lectures = schedule.filterByType('lecture');
-const thisWeek = schedule.getThisWeek();
-```
-
-## Search Across Groups
-
-`find()` fans out across multiple groups, courses, or programs — answering questions `getSchedule()` cannot: all lectures by a lecturer, all exams in a program, etc.
-
-```typescript
-// All exams in the current semester, all programs
+// All exams this semester across all programs
 await rtu.find({ type: 'exam' })
 
-// All lectures by a specific lecturer, narrowed to one program
+// All lectures by a lecturer, scoped to one program
 await rtu.find(
   { lecturer: { $regex: /Bērziņš/i } },
   { period: '25/26-R', program: 'RDBD0' }
@@ -86,19 +63,27 @@ await rtu.find(
   { period: '25/26-R', program: 'RDBD0' }
 )
 
+// Narrow to a single group
+await rtu.find(
+  { type: { $in: ['exam', 'test'] } },
+  { period: '25/26-R', program: 'RDBD0', course: 1, group: 13 }
+)
+
 // Entries in a specific week range
 await rtu.find(
   { weekNumber: { $gte: 10, $lte: 15 } },
-  { period: '25/26-R', program: 'RDBD0', course: 1, group: 13 }
+  { period: '25/26-R', program: 'RDBD0' }
 )
 ```
+
+`find()` fans out across all groups matching the scope, applies the filter, and returns a `QueryResult`. With no scope it searches the entire current semester.
 
 ### Scope
 
 ```typescript
 interface QueryScope {
   period?: number | string    // defaults to current period
-  program?: number | string   // defaults to all programs (many API calls — narrow when possible)
+  program?: number | string   // defaults to all programs — narrow to avoid excess API calls
   course?: number             // defaults to all courses
   group?: number              // defaults to all groups
   startDate?: Date | string   // defaults to period start
@@ -107,9 +92,9 @@ interface QueryScope {
 }
 ```
 
-### Filter Operators
+## Filter Operators
 
-The filter uses [MongoDB query syntax](https://github.com/crcn/sift.js) on `ScheduleEntry` fields:
+Standard [MongoDB query syntax](https://github.com/crcn/sift.js) applied to `ScheduleEntry` fields:
 
 | Operator | Example |
 |---|---|
@@ -125,144 +110,121 @@ The filter uses [MongoDB query syntax](https://github.com/crcn/sift.js) on `Sche
 | `$or` | `{ $or: [{ type: 'exam' }, { type: 'test' }] }` |
 | `$not` | `{ $not: { type: 'lab' } }` |
 
-> **Lecturer tip:** `$regex` matches only the scalar `lecturer` field. For robust matching across `lecturers[]` too, chain `.filterByLecturer()` on the result.
+> `$regex` matches the scalar `lecturer` field only. For matching across `lecturers[]` too, chain `.filterByLecturer()` on the result.
 
-## Working with Results
+## Results
 
-Both `getSchedule()` and `find()` return a result object with the same filtering, grouping, and convenience API. `find()` returns `QueryResult` which additionally carries multi-source metadata.
-
-### Filtering
-
-All filter methods return a new result object:
+`find()` returns a `QueryResult`:
 
 ```typescript
-result.filter(e => e.durationMinutes > 60)
+result.count
+result.isEmpty
+result.entries             // ScheduleEntry[]
+result.partial             // true if some group fetches failed
+result.errors              // QueryError[]
+result.sources             // QuerySource[] — which groups were searched
+
+// Filtering — each returns a new QueryResult
+result.filter(e => e.durationMinutes > 90)
 result.filterByType('lecture')
 result.filterByType(['lecture', 'lab'])
-result.filterByDateRange(from, to)
-result.filterByDate(date)
 result.filterByLecturer('Smith')
-result.filterBySubject('Programming')
+result.filterBySubject('Math')
 result.filterByLocation('Building A')
-result.filterByDayOfWeek(1)              // 1=Monday … 7=Sunday
-```
+result.filterByDate(date)
+result.filterByDateRange(from, to)
+result.filterByDayOfWeek(1)   // 1=Monday … 7=Sunday
 
-**Types:** `lecture` | `practical` | `lab` | `seminar` | `consultation` | `exam` | `test` | `other`
-
-### Grouping
-
-```typescript
-result.groupByWeek()       // Map<weekNumber, ScheduleEntry[]>
-result.groupByDate()       // Map<'YYYY-MM-DD', ScheduleEntry[]>
-result.groupByDayOfWeek()  // Map<1-7, ScheduleEntry[]>
-result.groupBySubject()    // Map<subjectCode, ScheduleEntry[]>
-result.groupByLecturer()   // Map<name, ScheduleEntry[]>
-result.groupByType()       // Map<type, ScheduleEntry[]>
-```
-
-### Convenience
-
-```typescript
+// Convenience
 result.getToday()
 result.getTomorrow()
 result.getThisWeek()
 result.getNextWeek()
-result.getUpcoming(7)      // next N days
+result.getUpcoming(7)
 result.getWeek(36)
 result.getCurrentWeek()
-```
 
-### Aggregation & Properties
+// Grouping
+result.groupByWeek()       // Map<number, ScheduleEntry[]>
+result.groupByDate()       // Map<string, ScheduleEntry[]>
+result.groupByDayOfWeek()  // Map<number, ScheduleEntry[]>
+result.groupBySubject()    // Map<string, ScheduleEntry[]>
+result.groupByLecturer()   // Map<string, ScheduleEntry[]>
+result.groupByType()       // Map<ScheduleEntryType, ScheduleEntry[]>
+result.groupBySource()     // Map<string, ScheduleEntry[]>
 
-```typescript
+// Aggregation
 result.getLecturers()      // string[]
 result.getSubjects()       // { name, code }[]
 result.getLocations()      // string[]
 result.getTypes()          // ScheduleEntryType[]
+result.getSources()        // QuerySource[]
 
-result.count
-result.isEmpty
-result.first
-result.last
-result.entries             // ScheduleEntry[]
 result.sorted('asc')
 result.toArray()
-
 for (const entry of result) { ... }
 [...result]
 ```
 
-### QueryResult extras (find() only)
-
-```typescript
-result.partial             // true if some group fetches failed
-result.errors              // QueryError[] — what failed and why
-result.sources             // QuerySource[] — which groups were searched
-result.groupBySource()     // Map keyed by "program-course-group"
-result.getSources()        // QuerySource[]
-```
-
-Each entry has `_source` identifying where it came from:
-
-```typescript
-entry._source?.program.code   // e.g. 'RDBD0'
-entry._source?.group?.name    // e.g. '13. grupa'
-```
-
-## ScheduleEntry
+### ScheduleEntry
 
 ```typescript
 interface ScheduleEntry {
-  id: number;
-  subject: { name: string; code: string };
+  id: number
+  subject: { name: string; code: string }
 
-  date: Date;
-  startTime: string;         // "09:00"
-  endTime: string;           // "10:30"
-  startDateTime: Date;
-  endDateTime: Date;
-  durationMinutes: number;
+  date: Date
+  startTime: string         // "09:00"
+  endTime: string           // "10:30"
+  startDateTime: Date
+  endDateTime: Date
+  durationMinutes: number
 
-  location: string;          // "Building A-423"
-  building?: string;
-  room?: string;
+  location: string
+  building?: string
+  room?: string
 
-  lecturer: string;
-  lecturers: string[];
+  lecturer: string
+  lecturers: string[]
 
-  type: ScheduleEntryType;
-  typeRaw: string;
+  type: ScheduleEntryType   // 'lecture' | 'practical' | 'lab' | 'seminar' | 'consultation' | 'exam' | 'test' | 'other'
+  typeRaw: string
 
-  group: string;
-  groups: string[];
+  group: string
+  groups: string[]
 
-  weekNumber: number;
-  dayOfWeek: number;         // 1-7 (Mon-Sun)
-  dayName: string;
+  weekNumber: number
+  dayOfWeek: number         // 1–7 (Mon–Sun)
+  dayName: string
 
-  _source?: QuerySource;     // set when fetched via find()
+  _source?: {               // set by find()
+    program: StudyProgram
+    course: StudyCourse
+    group: StudyGroup | undefined
+  }
 }
 ```
 
-## Error Handling
+## Errors
+
+| Error | When |
+|---|---|
+| `PeriodNotFoundError` | scope.period not found |
+| `ProgramNotFoundError` | scope.program not found |
+| `CourseNotFoundError` | scope.course not found |
+| `GroupNotFoundError` | scope.group not found |
+| `InvalidQueryError` | filter is not a valid sift query |
+| `DiscoveryError` | failed to reach the RTU website |
+
+Fetch failures for individual groups are non-throwing — they appear in `result.partial` and `result.errors`.
 
 ```typescript
-import {
-  PeriodNotFoundError,
-  ProgramNotFoundError,
-  CourseNotFoundError,
-  GroupNotFoundError,
-  InvalidOptionsError,   // bad options passed to getSchedule()
-  InvalidQueryError,     // bad filter passed to find()
-  DiscoveryError
-} from 'rtu-schedule-unofficial-client';
+import { PeriodNotFoundError } from 'rtu-schedule-unofficial-client';
 
 try {
-  const result = await rtu.find({ type: 'exam' }, { period: 'bad' });
-} catch (error) {
-  if (error instanceof PeriodNotFoundError) {
-    console.error(`Period not found: ${error.input}`);
-  }
+  await rtu.find({}, { period: 'bad' });
+} catch (e) {
+  if (e instanceof PeriodNotFoundError) console.error(e.input);
 }
 ```
 
@@ -271,8 +233,8 @@ try {
 ```typescript
 const rtu = new RTUSchedule({
   timeout: 10000,
-  cacheTimeout: 300000,           // API cache, default 5 min
-  discoveryCacheTimeout: 3600000  // discovery cache, default 1h
+  cacheTimeout: 300000,           // default 5 min
+  discoveryCacheTimeout: 3600000  // default 1h
 });
 
 rtu.clearCache();
@@ -285,58 +247,6 @@ rtu.refresh();
 import type {
   ScheduleEntry, ScheduleEntryType,
   QueryScope, QuerySource, QueryError,
-  StudyPeriod, StudyProgram, StudyCourse, StudyGroup,
-  GetScheduleOptions
+  StudyPeriod, StudyProgram, StudyCourse, StudyGroup
 } from 'rtu-schedule-unofficial-client';
-```
-
-## Examples
-
-### Get this week's lectures
-
-```typescript
-const rtu = new RTUSchedule();
-
-const schedule = await rtu.getSchedule({
-  period: '25/26-R',
-  program: 'RDBD0',
-  course: 1,
-  group: 13
-});
-
-const lectures = schedule.filterByType('lecture').getThisWeek();
-console.log(`${lectures.count} lectures this week`);
-
-for (const entry of lectures) {
-  console.log(`${entry.dayName} ${entry.startTime} — ${entry.subject.name}`);
-}
-```
-
-### Find all exams in a program
-
-```typescript
-const results = await rtu.find(
-  { type: { $in: ['exam', 'test'] } },
-  { period: '25/26-R', program: 'RDBD0' }
-);
-
-console.log(`Found ${results.count} exams across ${results.sources.length} groups`);
-
-const byWeek = results.groupByWeek();
-for (const [week, entries] of byWeek) {
-  console.log(`Week ${week}: ${entries.length} exams`);
-}
-```
-
-### Find a lecturer's full schedule
-
-```typescript
-const results = await rtu.find(
-  { lecturer: { $regex: /Bērziņš/i } },
-  { period: '25/26-R' }
-);
-
-results.filterByLecturer('Bērziņš').groupByDate().forEach((entries, date) => {
-  console.log(`${date}: ${entries.length} classes`);
-});
 ```
